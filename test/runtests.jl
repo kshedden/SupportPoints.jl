@@ -2,11 +2,11 @@ using Test, SupportPoints, Random
 
 # Simulate data for testing
 function gendat(n, f, sigma)
-    Y = Vector{Vector{Float64}}()
+	Y = zeros(2, n)
     for i = 1:n
         x = 2 * pi * rand()
         y = f(x) + sigma * randn()
-        push!(Y, [x, y])
+        Y[:, i] = [x, y]
     end
 	return Y
 end
@@ -18,6 +18,9 @@ end
 
 	for f in [x->x, x->sin(x), x->x^2]
 		for npt in [5, 10]
+
+			XX = zeros(2, npt)
+
 			for sigma in [0.1, 1, 10]
 				Y = gendat(n, f, sigma)
 
@@ -31,7 +34,9 @@ end
 				# worse fit than the estimated support points.
     			for i in 1:100
 					ii = randperm(n)[1:npt]
-					XX = [Y[i] + 0.01*randn(length(Y[i])) for i in ii]
+					for (k,j) in enumerate(ii)
+						XX[:, k] = Y[:, j] + 0.01*randn(2)
+					end
 					v = support_loss(Y, XX)
 					@test v > v0
     			end
