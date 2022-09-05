@@ -1,7 +1,7 @@
 #=
 Find support points that represent a distribution.
 
-Given a collection Y of vectors, find a set of support 
+Given a collection Y of vectors, find a set of support
 points of a specified size that captures the distribution
 represented by Y.
 
@@ -11,7 +11,7 @@ the following reference:
 https://arxiv.org/abs/1609.01811
 =#
 
-using Random, LinearAlgebra
+using Random, LinearAlgebra, Printf
 
 # The target function to be minimized, not explicitly used in the
 # optimization algorithm.  'Y' contains the data and 'X' contains
@@ -78,15 +78,21 @@ function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}) where {T<:Abs
     end
 end
 
-#=
+function supportpoints(Y::AbstractMatrix, n::Int; kwargs...)
+    return supportpoints(Matrix(Y), n::Int; kwargs...)
+end
+
+"""
 Find a set of 'n' support points that represent the distribution of
-the values in 'Y'.
-=#
+the values in 'Y', which is a d x n matrix.  The features are in
+the columns of Y.
+"""
 function supportpoints(
     Y::Matrix{T},
     n::Int;
     maxit = 1000,
     tol = 1e-4,
+    verbose = false,
 )::Matrix{T} where {T<:AbstractFloat}
 
     d, N = size(Y)
@@ -114,6 +120,9 @@ function supportpoints(
             di += norm(X1[:, j] - X[:, j])^2
         end
         di = sqrt(di)
+        if verbose
+            println(@sprintf("%5d %12.5f %12.5f", itr, di, support_loss(Y, X)))
+        end
         if di < tol
             success = true
             break
