@@ -11,11 +11,14 @@ the following reference:
 https://arxiv.org/abs/1609.01811
 =#
 
-using Random, LinearAlgebra, Printf
+using Random
+using LinearAlgebra
+using Printf
+using StableRNGs
 
 # The target function to be minimized, not explicitly used in the
-# optimization algorithm.  'Y' contains the data and 'X' contains
-# the candidate set of support points.
+# optimization algorithm.  The columns of 'Y' contain the data and
+# the columns of 'X' contain the candidate set of support points.
 function support_loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
 
     # Number of support points
@@ -83,6 +86,8 @@ function supportpoints(Y::AbstractMatrix, n::Int; kwargs...)
 end
 
 """
+    supportpoints(Y, n; maxit=1000, tol=1e-4, verbose=false, nowarnings = false, seed=123)
+
 Find a set of 'n' support points that represent the distribution of
 the values in 'Y', which is a d x n matrix.  The features are in
 the columns of Y.
@@ -93,6 +98,8 @@ function supportpoints(
     maxit = 1000,
     tol = 1e-4,
     verbose = false,
+    nowarnings = false,
+    seed = 123
 )::Matrix{T} where {T<:AbstractFloat}
 
     d, N = size(Y)
@@ -100,10 +107,11 @@ function supportpoints(
     # Starting values are a random sample from the data.
     # Need to perturb since the algorithm has a singularity
     # when a support point is exactly equal to a data point.
+    rng = StableRNG(seed)
     X = zeros(d, n)
-    ii = randperm(N)[1:n]
+    ii = randperm(rng, N)[1:n]
     for (j, i) in enumerate(ii)
-        X[:, j] = Y[:, i] + 0.1 * randn(d)
+        X[:, j] = Y[:, i] + 0.1 * randn(rng, d)
     end
 
     # Storage for the next iterate
@@ -128,12 +136,10 @@ function supportpoints(
             break
         end
 
-        for j = 1:n
-            X[:, j] .= X1[:, j]
-        end
+        X .= X1
     end
 
-    if !success
+    if !success && !nowarnings
         @warn "Support point estimation did not converge"
     end
 
