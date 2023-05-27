@@ -6,13 +6,13 @@
 
 # ## Usage
 
+# We generate points in the plane whose coordinates are independent
+# and follow standard exponential distributions.  Then we plot the
+# support points along with the underlying density countours.
+
 ENV["GKSwstype"] = "nul" #hide
 using SupportPoints, Plots, StableRNGs, LaTeXStrings, Statistics, Printf, Distributions
 rng = StableRNG(123)
-
-# We generate points in the plane whose coordinates are independent
-# and follow standard exponential distributions, and plot the
-# support points along with the underlying density countours.
 
 n = 1000
 p = 2

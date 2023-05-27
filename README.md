@@ -6,16 +6,14 @@ points whose empirical distribution represents a given target distribution.
 
 ## Usage
 
-````julia
-using SupportPoints, Plots, StableRNGs, LaTeXStrings, Statistics, Printf, Distributions
-rng = StableRNG(123)
-````
-
 We generate points in the plane whose coordinates are independent
-and follow standard exponential distributions, and plot the
+and follow standard exponential distributions.  Then we plot the
 support points along with the underlying density countours.
 
 ````julia
+using SupportPoints, Plots, StableRNGs, LaTeXStrings, Statistics, Printf, Distributions
+rng = StableRNG(123)
+
 n = 1000
 p = 2
 
