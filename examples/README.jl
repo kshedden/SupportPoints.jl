@@ -6,7 +6,7 @@
 
 # ## Usage
 
-# We generate points in the plane whose coordinates are independent
+# Below we generate points in the plane whose coordinates are independent
 # and follow standard exponential distributions.  Then we plot the
 # support points along with the underlying density countours.
 
