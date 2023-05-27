@@ -28,7 +28,7 @@ function plot_density(dx, dy, xr, yr)
     X = repeat(reshape(x, 1, :), length(y), 1)
     Y = repeat(y, 1, length(x))
     Z = map(f, X, Y)
-    plt = contour(x, y, Z, cbar=false, levels=15)
+    plt = contour(x, y, Z, cbar=false, levels=15, size=(400,300))
     return plt
 end
 
