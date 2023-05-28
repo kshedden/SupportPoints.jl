@@ -1,4 +1,4 @@
-The Earth module is licensed under the MIT License:
+The SupportPoints module is licensed under the MIT License:
 
 > Copyright (c) 2023: Kerby Shedden.
 >
