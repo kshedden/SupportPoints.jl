@@ -11,15 +11,13 @@ the following reference:
 https://arxiv.org/abs/1609.01811
 =#
 
-using Random
-using LinearAlgebra
-using Printf
-using StableRNGs
+"""
+    loss(Y, X)
 
-# The target function to be minimized, not explicitly used in the
-# optimization algorithm.  The columns of 'Y' contain the data and
-# the columns of 'X' contain the candidate set of support points.
-function support_loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
+The target function to be minimized.  The columns of 'Y' contain the data and
+the columns of 'X' contain the candidate set of support points.
+"""
+function loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
 
     # Number of support points
     n = size(X, 2)
@@ -31,6 +29,7 @@ function support_loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
     for y in eachcol(Y)
         for x in eachcol(X)
             f += norm(x - y)
+            end
         end
     end
     f *= 2 / (n * N)
@@ -42,6 +41,45 @@ function support_loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
     end
 
     return f
+end
+
+"""
+    grad(Y, X, G)
+
+The gradient of the target function to be minimized.  The columns of 'Y' contain the data and
+the columns of 'X' contain the candidate set of support points.
+"""
+function grad!(Y::Matrix{T}, X::Matrix{T}, G::Matrix{T}) where {T<:AbstractFloat}
+
+    # Number of support points
+    n = size(X, 2)
+
+    # Number of data points
+    N = size(Y, 2)
+
+    # Number of variables
+    p = size(X, 1)
+
+    u = zeros(p)
+    G .= 0
+
+    for y in eachcol(Y)
+        for (j, x) in enumerate(eachcol(X))
+            u .= (x - y)
+            u ./= norm(x - y)
+            G[:, j] .+= u
+        end
+    end
+    G .*= 2 / (n * N)
+
+    for (j1, x1) in enumerate(eachcol(X))
+        for j2 = 1:j1-1
+            u .= x1 - X[:, j2]
+            u ./= norm(u)
+            G[:, j1] .-= 2 * u / n^2
+            G[:, j2] .+= 2 * u / n^2
+        end
+    end
 end
 
 # One iteration of fitting.  Returns an updated set of support points
@@ -85,37 +123,17 @@ function supportpoints(Y::AbstractMatrix, n::Int; kwargs...)
     return supportpoints(Matrix(Y), n::Int; kwargs...)
 end
 
-"""
-    supportpoints(Y, n; maxit=1000, tol=1e-4, verbose=false, nowarnings = false, seed=123)
+# Optimize the support points (X) for the data (Y) using MM iterations, starting
+# from the provided value of X.
+function fit_mm!(Y, X; maxit, tol, verbosity, rng=Random.default_rng())
 
-Find a set of 'n' support points that represent the distribution of
-the values in 'Y', which is a d x n matrix.  The features are in
-the columns of Y.
-"""
-function supportpoints(
-    Y::Matrix{T},
-    n::Int;
-    maxit = 1000,
-    tol = 1e-4,
-    verbose = false,
-    nowarnings = false,
-    seed = 123
-)::Matrix{T} where {T<:AbstractFloat}
+    # Number of support points
+    npt = size(X, 2)
 
     d, N = size(Y)
 
-    # Starting values are a random sample from the data.
-    # Need to perturb since the algorithm has a singularity
-    # when a support point is exactly equal to a data point.
-    rng = StableRNG(seed)
-    X = zeros(d, n)
-    ii = randperm(rng, N)[1:n]
-    for (j, i) in enumerate(ii)
-        X[:, j] = Y[:, i] + 0.1 * randn(rng, d)
-    end
-
     # Storage for the next iterate
-    X1 = zeros(d, n)
+    X1 = zeros(d, npt)
 
     success = false
     for itr = 1:maxit
@@ -128,8 +146,8 @@ function supportpoints(
             di += norm(X1[:, j] - X[:, j])^2
         end
         di = sqrt(di)
-        if verbose
-            println(@sprintf("%5d %12.5f %12.5f", itr, di, support_loss(Y, X)))
+        if verbosity > 1
+            println(@sprintf("%5d %12.5f %12.5f", itr, di, loss(Y, X)))
         end
         if di < tol
             success = true
@@ -139,8 +157,70 @@ function supportpoints(
         X .= X1
     end
 
-    if !success && !nowarnings
-        @warn "Support point estimation did not converge"
+    return success
+end
+
+function get_start(Y, npt; rng=Random.default_rng())
+
+    d, N = size(Y)
+
+    # Starting values are a random sample from the data.
+    # Need to perturb since the algorithm has a singularity
+    # when a support point is exactly equal to a data point.
+    X = zeros(d, npt)
+    ii = randperm(rng, N)[1:npt]
+    for (j, i) in enumerate(ii)
+        X[:, j] = Y[:, i] + 0.1 * randn(rng, d)
+    end
+
+    return X
+end
+
+function fit_grad!(Y, X; meth=LBFGS(), opts=Optim.options())
+
+    # Data dimension (d) and number of observations (N)
+    d, N = size(Y)
+
+    # Number of support points
+    npt = size(X, 2)
+
+    # The loss function, passing the support points as a vector
+    loss = Xv -> SupportPoints.loss(Y, reshape(Xv, d, npt))
+
+    # The gradient of the loss function, passing the support points and gradient as vectors
+    grad! = (Gv, Xv) -> SupportPoints.grad!(Y, reshape(Xv, d, npt), reshape(Gv, d, npt))
+
+    rr = optimize(loss, grad!, copy(vec(X)), meth, opts)
+
+    X .= reshape(Optim.minimizer(r), d, npt)
+
+    return rr
+end
+
+"""
+    supportpoints(Y, n; maxit=1000, tol=1e-4, verbosity=0, rng=Random.default_rng())
+
+Find a set of 'n' support points that represent the distribution of
+the values in 'Y', which is a d x n matrix.  The features are in
+the columns of Y.
+"""
+function supportpoints(Y::Matrix{T}, npt::Int; maxit::Int = 1000, maxit_mm::Int = 5, tol = 1e-4, verbosity::Float64 = 0, rng = Random.default_rng()) where {T<:AbstractFloat}
+
+    d, N = size(Y)
+
+    X = get_start(Y, npt; rng=rng)
+
+    # Start with some MM iterations
+    success = fit_mm!(Y, X; maxit=maxit_mm, tol=tol, verbosity=verbosity, rng=rng)
+
+    # Gradient iterations
+    if maxit > 0
+        opts = Optim.Options(g_tol=1e-4, iterations=maxit)
+        rr = fit_grad!(Y, X; opts)
+        success = Optim.converged(rr)
+        if !success && verbosity > 0
+            @warn "Support point estimation did not converge"
+        end
     end
 
     return X

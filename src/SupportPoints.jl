@@ -1,6 +1,12 @@
 module SupportPoints
 
-export supportpoints, support_loss
+using Random
+using LinearAlgebra
+using Printf
+using Optim
+using StableRNGs
+
+export supportpoints
 
 include("support.jl")
 
