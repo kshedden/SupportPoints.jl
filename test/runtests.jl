@@ -6,6 +6,8 @@ using StableRNGs
 
 rng = StableRNG(123)
 
+include("Aqua.jl")
+
 # Simulate data for testing
 function gendat(n, f, sigma)
     Y = zeros(2, n)
@@ -67,7 +69,7 @@ end
             for sigma in [0.1, 1, 10]
                 Y = gendat(n, f, sigma)
 
-                X0 = supportpoints(Y, npt; maxit=10)
+                X0 = supportpoints(Y, npt; maxit_grad=10)
                 par0 = vec(X0)
                 agrad = zeros(p * npt)
 

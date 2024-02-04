@@ -29,7 +29,6 @@ function loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
     for y in eachcol(Y)
         for x in eachcol(X)
             f += norm(x - y)
-            end
         end
     end
     f *= 2 / (n * N)
@@ -119,10 +118,6 @@ function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}) where {T<:Abs
     end
 end
 
-function supportpoints(Y::AbstractMatrix, n::Int; kwargs...)
-    return supportpoints(Matrix(Y), n::Int; kwargs...)
-end
-
 # Optimize the support points (X) for the data (Y) using MM iterations, starting
 # from the provided value of X.
 function fit_mm!(Y, X; maxit, tol, verbosity, rng=Random.default_rng())
@@ -160,13 +155,13 @@ function fit_mm!(Y, X; maxit, tol, verbosity, rng=Random.default_rng())
     return success
 end
 
+# Starting values are a random sample from the data.
+# Need to perturb since the algorithm has a singularity
+# when a support point is exactly equal to a data point.
 function get_start(Y, npt; rng=Random.default_rng())
 
     d, N = size(Y)
 
-    # Starting values are a random sample from the data.
-    # Need to perturb since the algorithm has a singularity
-    # when a support point is exactly equal to a data point.
     X = zeros(d, npt)
     ii = randperm(rng, N)[1:npt]
     for (j, i) in enumerate(ii)
@@ -192,30 +187,34 @@ function fit_grad!(Y, X; meth=LBFGS(), opts=Optim.options())
 
     rr = optimize(loss, grad!, copy(vec(X)), meth, opts)
 
-    X .= reshape(Optim.minimizer(r), d, npt)
+    X .= reshape(Optim.minimizer(rr), d, npt)
 
     return rr
 end
 
 """
-    supportpoints(Y, n; maxit=1000, tol=1e-4, verbosity=0, rng=Random.default_rng())
+    supportpoints(Y, npt; maxit_grad=1000, tol_mm=1e-4, verbosity=0, rng=Random.default_rng())
 
-Find a set of 'n' support points that represent the distribution of
-the values in 'Y', which is a d x n matrix.  The features are in
-the columns of Y.
+Find a set of 'npt' support points that represent the distribution of
+the values in 'Y', which is a d x n matrix.  The features are in the
+columns of 'Y'.  The support points are returned as a d x npt matrix.
+
+The default algorithm is up to 'maxit_mm' majorization/maximization iterations,
+followed by up to 'maxit_grad' gradient descent iterations.
 """
-function supportpoints(Y::Matrix{T}, npt::Int; maxit::Int = 1000, maxit_mm::Int = 5, tol = 1e-4, verbosity::Float64 = 0, rng = Random.default_rng()) where {T<:AbstractFloat}
+function supportpoints(Y, npt; maxit_grad=1000, maxit_mm=5, tol_mm=1e-4, verbosity=0, rng=Random.default_rng())
 
+    # d = feature dimension, N = number of observations
     d, N = size(Y)
 
     X = get_start(Y, npt; rng=rng)
 
     # Start with some MM iterations
-    success = fit_mm!(Y, X; maxit=maxit_mm, tol=tol, verbosity=verbosity, rng=rng)
+    _ = fit_mm!(Y, X; maxit=maxit_mm, tol=tol_mm, verbosity=verbosity, rng=rng)
 
     # Gradient iterations
-    if maxit > 0
-        opts = Optim.Options(g_tol=1e-4, iterations=maxit)
+    if maxit_grad > 0
+        opts = Optim.Options(g_tol=1e-4, iterations=maxit_grad)
         rr = fit_grad!(Y, X; opts)
         success = Optim.converged(rr)
         if !success && verbosity > 0
