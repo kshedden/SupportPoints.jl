@@ -17,18 +17,19 @@ https://arxiv.org/abs/1609.01811
 The target function to be minimized.  The columns of 'Y' contain the data and
 the columns of 'X' contain the candidate set of support points.
 """
-function loss(Y::Matrix{T}, X::Matrix{T}) where {T<:AbstractFloat}
+function loss(Y::Matrix{T}, X::Matrix{T}; wgts=[]) where {T<:AbstractFloat}
 
     # Number of support points
     n = size(X, 2)
 
     # Number of data points
-    N = size(Y, 2)
+    N = length(wgts) > 0 ? sum(wgts) : size(Y, 2)
 
     f = 0.0
-    for y in eachcol(Y)
+    for (i,y) in enumerate(eachcol(Y))
+        w = length(wgts) > 0 ? wgts[i] : 1.0
         for x in eachcol(X)
-            f += norm(x - y)
+            f += w * norm(x - y)
         end
     end
     f *= 2 / (n * N)
@@ -48,13 +49,13 @@ end
 The gradient of the target function to be minimized.  The columns of 'Y' contain the data and
 the columns of 'X' contain the candidate set of support points.
 """
-function grad!(Y::Matrix{T}, X::Matrix{T}, G::Matrix{T}) where {T<:AbstractFloat}
+function grad!(Y::Matrix{T}, X::Matrix{T}, G::Matrix{T}; wgts=[]) where {T<:AbstractFloat}
 
     # Number of support points
     n = size(X, 2)
 
     # Number of data points
-    N = size(Y, 2)
+    N = length(wgts) > 0 ? sum(wgts) : size(Y, 2)
 
     # Number of variables
     p = size(X, 1)
@@ -62,15 +63,18 @@ function grad!(Y::Matrix{T}, X::Matrix{T}, G::Matrix{T}) where {T<:AbstractFloat
     u = zeros(p)
     G .= 0
 
-    for y in eachcol(Y)
+    # norm(y_i - x_j) terms
+    for (i,y) in enumerate(eachcol(Y))
+        w = length(wgts) > 0 ? wgts[i] : 1.0
         for (j, x) in enumerate(eachcol(X))
             u .= (x - y)
             u ./= norm(x - y)
-            G[:, j] .+= u
+            G[:, j] .+= w * u
         end
     end
     G .*= 2 / (n * N)
 
+    # norm(x_j - x_k) terms
     for (j1, x1) in enumerate(eachcol(X))
         for j2 = 1:j1-1
             u .= x1 - X[:, j2]
@@ -83,10 +87,10 @@ end
 
 # One iteration of fitting.  Returns an updated set of support points
 # based on the current support points in X and the data in Y.
-function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}) where {T<:AbstractFloat}
+function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}; wgts=[]) where {T<:AbstractFloat}
 
     # Size of the sample data.
-    N = size(Y, 2)
+    N = length(wgts) > 0 ? sum(wgts) : size(Y, 2)
 
     # Dimension of the vectors
     d = size(Y, 1)
@@ -108,19 +112,20 @@ function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}) where {T<:Abs
         X1[:, i] *= N / n
 
         q = 0.0
-        for y in eachcol(Y)
+        for (k,y) in enumerate(eachcol(Y))
+            w = length(wgts) > 0 ? wgts[k] : 1.0
             nm = norm(y - xi)
-            X1[:, i] += y / nm
-            q += 1 / nm
+            X1[:, i] += w * y / nm
+            q += w / nm
         end
 
-        X1[:, i] /= q
+        X1[:, i] ./= q
     end
 end
 
 # Optimize the support points (X) for the data (Y) using MM iterations, starting
 # from the provided value of X.
-function fit_mm!(Y, X; maxit, tol, verbosity, rng=Random.default_rng())
+function fit_mm!(Y, X; maxit, tol, verbosity, wgts=[], rng=Random.default_rng())
 
     # Number of support points
     npt = size(X, 2)
@@ -130,9 +135,13 @@ function fit_mm!(Y, X; maxit, tol, verbosity, rng=Random.default_rng())
     # Storage for the next iterate
     X1 = zeros(d, npt)
 
+    if verbosity > 1
+        println("Support points majorization iterations:")
+    end
+
     success = false
     for itr = 1:maxit
-        update_support(Y, X, X1)
+        update_support(Y, X, X1; wgts=wgts)
 
         # Assess convergence based on the L2 distance from the
         # previous support points to the current ones.
@@ -142,7 +151,7 @@ function fit_mm!(Y, X; maxit, tol, verbosity, rng=Random.default_rng())
         end
         di = sqrt(di)
         if verbosity > 1
-            println(@sprintf("%5d %12.5f %12.5f", itr, di, loss(Y, X)))
+            println(@sprintf("%5d %12.5f %12.5f", itr, di, loss(Y, X; wgts=wgts)))
         end
         if di < tol
             success = true
@@ -171,7 +180,7 @@ function get_start(Y, npt; rng=Random.default_rng())
     return X
 end
 
-function fit_grad!(Y, X; meth=LBFGS(), opts=Optim.options())
+function fit_grad!(Y, X; meth=LBFGS(), opts=Optim.options(), wgts=[], verbosity=0)
 
     # Data dimension (d) and number of observations (N)
     d, N = size(Y)
@@ -180,12 +189,24 @@ function fit_grad!(Y, X; meth=LBFGS(), opts=Optim.options())
     npt = size(X, 2)
 
     # The loss function, passing the support points as a vector
-    loss = Xv -> SupportPoints.loss(Y, reshape(Xv, d, npt))
+    loss = Xv -> SupportPoints.loss(Y, reshape(Xv, d, npt); wgts=wgts)
 
     # The gradient of the loss function, passing the support points and gradient as vectors
-    grad! = (Gv, Xv) -> SupportPoints.grad!(Y, reshape(Xv, d, npt), reshape(Gv, d, npt))
+    grad! = (Gv, Xv) -> SupportPoints.grad!(Y, reshape(Xv, d, npt), reshape(Gv, d, npt); wgts=wgts)
+
+    if verbosity > 0
+        print("Starting support points gradient optimization...")
+    end
 
     rr = optimize(loss, grad!, copy(vec(X)), meth, opts)
+
+    if !Optim.converged(rr)
+        @warn "Gradient optimization did not converge"
+    end
+
+    if verbosity > 0
+        println("Done")
+    end
 
     X .= reshape(Optim.minimizer(rr), d, npt)
 
@@ -202,7 +223,9 @@ columns of 'Y'.  The support points are returned as a d x npt matrix.
 The default algorithm is up to 'maxit_mm' majorization/maximization iterations,
 followed by up to 'maxit_grad' gradient descent iterations.
 """
-function supportpoints(Y, npt; maxit_grad=1000, maxit_mm=5, tol_mm=1e-4, verbosity=0, rng=Random.default_rng())
+function supportpoints(Y, npt; maxit_grad=1000, maxit_mm=5, wgts=[], tol_mm=1e-4, verbosity=0, rng=Random.default_rng())
+
+    Y = copy(Y)
 
     # d = feature dimension, N = number of observations
     d, N = size(Y)
@@ -210,12 +233,12 @@ function supportpoints(Y, npt; maxit_grad=1000, maxit_mm=5, tol_mm=1e-4, verbosi
     X = get_start(Y, npt; rng=rng)
 
     # Start with some MM iterations
-    _ = fit_mm!(Y, X; maxit=maxit_mm, tol=tol_mm, verbosity=verbosity, rng=rng)
+    _ = fit_mm!(Y, X; maxit=maxit_mm, wgts=wgts, tol=tol_mm, verbosity=verbosity, rng=rng)
 
     # Gradient iterations
     if maxit_grad > 0
         opts = Optim.Options(g_tol=1e-4, iterations=maxit_grad)
-        rr = fit_grad!(Y, X; opts)
+        rr = fit_grad!(Y, X; opts, wgts=wgts, verbosity=verbosity)
         success = Optim.converged(rr)
         if !success && verbosity > 0
             @warn "Support point estimation did not converge"
