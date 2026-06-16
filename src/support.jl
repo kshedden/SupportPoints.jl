@@ -21,22 +21,33 @@ function loss(Y::Matrix{T}, X::Matrix{T}; wgts=[]) where {T<:AbstractFloat}
 
     # Number of support points
     n = size(X, 2)
+    p = size(Y, 1)
 
-    # Number of data points
-    N = length(wgts) > 0 ? sum(wgts) : size(Y, 2)
+    # Normalize weights to Union{Nothing,Vector{T}} for type stability
+    W = isempty(wgts) ? nothing : convert(Vector{T}, wgts)
+    N = W === nothing ? T(size(Y, 2)) : sum(W)
 
-    f = 0.0
-    for (i,y) in enumerate(eachcol(Y))
-        w = length(wgts) > 0 ? wgts[i] : 1.0
+    f = zero(T)
+    for (i, y) in enumerate(eachcol(Y))
+        w = W === nothing ? one(T) : W[i]
         for x in eachcol(X)
-            f += w * norm(x - y)
+            nm = zero(T)
+            @inbounds for k in 1:p
+                nm += (x[k] - y[k])^2
+            end
+            f += w * sqrt(nm)
         end
     end
     f *= 2 / (n * N)
 
     for (j1, x1) in enumerate(eachcol(X))
-        for j2 = 1:j1-1
-            f -= 2 * norm(x1 - X[:, j2]) / n^2
+        for j2 in 1:j1-1
+            x2 = @view X[:, j2]
+            nm = zero(T)
+            @inbounds for k in 1:p
+                nm += (x1[k] - x2[k])^2
+            end
+            f -= 2 * sqrt(nm) / n^2
         end
     end
 
@@ -54,33 +65,47 @@ function grad!(Y::Matrix{T}, X::Matrix{T}, G::Matrix{T}; wgts=[]) where {T<:Abst
     # Number of support points
     n = size(X, 2)
 
-    # Number of data points
-    N = length(wgts) > 0 ? sum(wgts) : size(Y, 2)
+    # Normalize weights to Union{Nothing,Vector{T}} for type stability
+    W = isempty(wgts) ? nothing : convert(Vector{T}, wgts)
+    N = W === nothing ? T(size(Y, 2)) : sum(W)
 
     # Number of variables
     p = size(X, 1)
 
-    u = zeros(p)
+    u = zeros(T, p)
     G .= 0
 
     # norm(y_i - x_j) terms
-    for (i,y) in enumerate(eachcol(Y))
-        w = length(wgts) > 0 ? wgts[i] : 1.0
+    for (i, y) in enumerate(eachcol(Y))
+        w = W === nothing ? one(T) : W[i]
         for (j, x) in enumerate(eachcol(X))
-            u .= (x - y)
-            u ./= norm(x - y)
-            G[:, j] .+= w * u
+            nm = zero(T)
+            @inbounds for k in 1:p
+                u[k] = x[k] - y[k]
+                nm += u[k]^2
+            end
+            c = w / sqrt(nm)
+            @inbounds for k in 1:p
+                G[k, j] += c * u[k]
+            end
         end
     end
     G .*= 2 / (n * N)
 
     # norm(x_j - x_k) terms
     for (j1, x1) in enumerate(eachcol(X))
-        for j2 = 1:j1-1
-            u .= x1 - X[:, j2]
-            u ./= norm(u)
-            G[:, j1] .-= 2 * u / n^2
-            G[:, j2] .+= 2 * u / n^2
+        for j2 in 1:j1-1
+            x2 = @view X[:, j2]
+            nm = zero(T)
+            @inbounds for k in 1:p
+                u[k] = x1[k] - x2[k]
+                nm += u[k]^2
+            end
+            c = 2 / (n^2 * sqrt(nm))
+            @inbounds for k in 1:p
+                G[k, j1] -= c * u[k]
+                G[k, j2] += c * u[k]
+            end
         end
     end
 end
@@ -89,8 +114,9 @@ end
 # based on the current support points in X and the data in Y.
 function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}; wgts=[]) where {T<:AbstractFloat}
 
-    # Size of the sample data.
-    N = length(wgts) > 0 ? sum(wgts) : size(Y, 2)
+    # Normalize weights to Union{Nothing,Vector{T}} for type stability
+    W = isempty(wgts) ? nothing : convert(Vector{T}, wgts)
+    N = W === nothing ? T(size(Y, 2)) : sum(W)
 
     # Dimension of the vectors
     d = size(Y, 1)
@@ -99,27 +125,43 @@ function update_support(Y::Matrix{T}, X::Matrix{T}, X1::Matrix{T}; wgts=[]) wher
     n = size(X, 2)
 
     # Update each support point in turn
-    u = zeros(d)
+    u = zeros(T, d)
     for (i, xi) in enumerate(eachcol(X))
 
-        X1[:, i] .= 0
+        xi1 = @view X1[:, i]
+        xi1 .= 0
         for (j, xj) in enumerate(eachcol(X))
             if j != i
-                u .= xi - xj
-                X1[:, i] += u / norm(u)
+                nm = zero(T)
+                @inbounds for k in 1:d
+                    u[k] = xi[k] - xj[k]
+                    nm += u[k]^2
+                end
+                nm = sqrt(nm)
+                @inbounds for k in 1:d
+                    xi1[k] += u[k] / nm
+                end
             end
         end
-        X1[:, i] *= N / n
+        xi1 .*= N / n
 
-        q = 0.0
-        for (k,y) in enumerate(eachcol(Y))
-            w = length(wgts) > 0 ? wgts[k] : 1.0
-            nm = norm(y - xi)
-            X1[:, i] += w * y / nm
-            q += w / nm
+        q = zero(T)
+        for (j, y) in enumerate(eachcol(Y))
+            w = W === nothing ? one(T) : W[j]
+            nm = zero(T)
+            @inbounds for k in 1:d
+                u[k] = y[k] - xi[k]
+                nm += u[k]^2
+            end
+            nm = sqrt(nm)
+            inv_nm = w / nm
+            @inbounds for k in 1:d
+                xi1[k] += inv_nm * y[k]
+            end
+            q += inv_nm
         end
 
-        X1[:, i] ./= q
+        xi1 ./= q
     end
 end
 
@@ -145,11 +187,7 @@ function fit_mm!(Y, X; maxit, tol, verbosity, wgts=[], rng=Random.default_rng())
 
         # Assess convergence based on the L2 distance from the
         # previous support points to the current ones.
-        di = 0.0
-        for j = 1:size(X, 2)
-            di += norm(X1[:, j] - X[:, j])^2
-        end
-        di = sqrt(di)
+        di = norm(X1 - X)
         if verbosity > 1
             println(@sprintf("%5d %12.5f %12.5f", itr, di, loss(Y, X; wgts=wgts)))
         end
