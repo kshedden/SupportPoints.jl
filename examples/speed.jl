@@ -29,8 +29,10 @@ for it in 1:numit
 
     # MM-only approach
     t2 = time()
-    X2 = supportpoints(Y, npt; maxit_mm=1000, maxit=0)
+    X2 = supportpoints(Y, npt; maxit_mm=1000, maxit_grad=0)
     t2 = time() - t2
 
     rr[it, :] = [t1, t2, SupportPoints.loss(Y, X1), SupportPoints.loss(Y, X2)]
 end
+
+display(rr)
